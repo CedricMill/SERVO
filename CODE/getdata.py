@@ -1,22 +1,40 @@
-import odrive
-from odrive.enums import *
+import can
+import struct
 import time
 
-print("Zoeken naar ODrive...")
+# Node ID van jouw ODrive
+NODE_ID = 1
+ENCODER_POS_RTR_ID = 0x009 + NODE_ID
 
-# Zoek automatisch naar een verbonden ODrive via USB
-odrv = odrive.find_any()
+print("Start CAN-bus (can0)...")
+bus = can.interface.Bus(channel='can0', bustype='socketcan')
 
-print("Verbonden met ODrive!")
-print("Firmware versie:", odrv.fw_version_major, odrv.fw_version_minor, odrv.fw_version_revision)
+while True:
+    # Vraag positie op met Remote Frame (RTR)
+    rtr_msg = can.Message(arbitration_id=ENCODER_POS_RTR_ID,
+                          is_extended_id=False,
+                          is_remote_frame=True,
+                          dlc=4)  # Verwacht 4 bytes als antwoord
 
-# Simpele test: lees de bus voltage
-print("Bus Voltage:", odrv.vbus_voltage, "V")
+    try:
+        bus.send(rtr_msg)
+        print(f"RTR verzonden naar ID {hex(ENCODER_POS_RTR_ID)}")
+    except can.CanError:
+        print("Fout bij verzenden van CAN-verzoek")
 
-# Simpele test: print de huidige encoderpositie van axis0
-print("Encoder Positie (axis0):", odrv.axis0.encoder.pos_estimate)
+    # Wacht op antwoord met dezelfde ID
+    timeout = 1.0  # seconde
+    response = bus.recv(timeout)
 
-# Eventueel: LED laten knipperen als bevestiging (als ondersteund)
-# odrv.axis0.requested_state = AXIS_STATE_IDLE
-# time.sleep(1)
-# odrv.axis0.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+    if response and response.arbitration_id == ENCODER_POS_RTR_ID:
+        if len(response.data) == 4:
+            # Float uitpakken (4 bytes, little endian)
+            pos, = struct.unpack('<f', response.data)
+            print(f"Encoder Positie: {pos}")
+        else:
+            print(f"Ongeldige data: {response.data}")
+    else:
+        print("Geen geldig antwoord ontvangen")
+
+    time.sleep(1)  # Wacht even voor volgende verzoek
+
