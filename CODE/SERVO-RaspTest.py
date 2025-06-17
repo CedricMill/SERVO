@@ -1,66 +1,62 @@
+# Plaats deze code in Thonny op je Raspberry Pi
+
 import can
-import time
-import math
 import struct
+import time
 
-# Stel hier je ODrive CAN node-ID in (standaard 0x01)
-NODE_ID = 0x01
+# 1) Open de CAN-bus (SocketCAN)
+bus = can.interface.Bus(channel='can0', bustype='socketcan_native')
 
-# CAN commando-ID's (volgens ODrive CAN protocol)
-SET_INPUT_POS_ID = 0x00C  # 0x00C = Set Input Position command
+# 2) Zet hier het node ID van je ODrive (default is 0)
+NODE_ID = 0
 
-# Instellen van frequentie en amplitude van de sinus
-FREQUENCY_HZ = 0.5      # halve cyclus per seconde
-AMPLITUDE_TURNS = 1.0   # sinus schommelt tussen -1 en 1 om 0
-OFFSET_TURNS = 0        # als je niet rond 0 wil schommelen
+# Helper: bouw de CANSimple-arbitrage-ID
+def cs_id(cmd_id: int) -> int:
+    return (NODE_ID << 5) | cmd_id
 
-# Ophaalperiode (in seconden)
-UPDATE_INTERVAL = 0.02  # 50 Hz
+# 3) Functie om de as in een bepaalde state te zetten
+#    CMD_ID 0x07 = Set_Axis_State
+#    state: 1=IDLE, 3=CLOSED_LOOP_CONTROL, etc.
+def set_axis_state(state: int):
+    arb_id = cs_id(0x07)
+    # Axis_Requested_State is een 32-bit little-endian veld; padding = 0
+    data = struct.pack('<I', state)
+    msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
+    bus.send(msg)
 
-# Totale tijdsduur om te bewegen (in seconden)
-RUN_DURATION = 20
+# 4) Functie om snelheidscommando te sturen
+#    CMD_ID 0x0D = Set_Input_Vel
+#    vel en torque_ff zijn IEEE754-floats (4 bytes elk)
+def set_input_velocity(vel: float, torque_ff: float = 0.0):
+    arb_id = cs_id(0x0D)
+    data = struct.pack('<ff', vel, torque_ff)
+    msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
+    bus.send(msg)
 
-def float_to_bytes(value):
-    """Zet float32 om naar 4 bytes in little-endian formaat"""
-    return struct.pack("<f", value)
-
-def send_input_position(bus, position_turns):
-    """
-    Stuurt een 'Set Input Position' commando naar de ODrive.
-    """
-    data = float_to_bytes(position_turns) + bytes([0, 0, 0, 0])  # 4 bytes voor velden vel=0, accel=0
-    msg = can.Message(
-        arbitration_id=(NODE_ID << 5) | SET_INPUT_POS_ID,
-        data=data,
-        is_extended_id=False
-    )
-    try:
-        bus.send(msg)
-    except can.CanError as e:
-        print(f"CAN-fout: {e}")
-
-def main():
-    bus = can.interface.Bus(channel='can0', bustype='socketcan')
-
-    print("Start sinusbeweging...")
-
-    start_time = time.time()
-    while True:
-        elapsed = time.time() - start_time
-        if elapsed > RUN_DURATION:
-            break
-
-        # Bereken sinuspositie
-        angle = 2 * math.pi * FREQUENCY_HZ * elapsed
-        position = OFFSET_TURNS + AMPLITUDE_TURNS * math.sin(angle)
-
-        # Verstuur de positie
-        send_input_position(bus, position)
-
-        # Even wachten voor volgende update
-        time.sleep(UPDATE_INTERVAL)
-
-    print("Sinusbeweging afgerond.")
-
+# 5) Voorbeeld: zet de as in closed-loop control en stuur een velocity
 if __name__ == "__main__":
-    main()
+    # Ga naar CLOSED_LOOP_CONTROL (state = 3)
+    print("Switching axis to CLOSED_LOOP_CONTROL...")
+    set_axis_state(3)
+    time.sleep(0.1)  # korte pauze om de state over CAN te laten gaan
+
+    # Stuur een velocity van 1000 counts/s met 0 torque feed-forward
+    print("Sending velocity command...")
+    set_input_velocity(1000.0, 0.0)
+
+    # Houd het commando even vast (alternatief: in een loop sturen)
+    time.sleep(5.0)
+
+    # Stop (ga terug naar IDLE)
+    print("Stopping axis...")
+    set_axis_state(1)
+    ```
+
+**Toelichting**  
+- We gebruiken `socketcan_native` zodat Python-CAN direct op SocketCAN draait. :contentReference[oaicite:0]{index=0}  
+- ODrive’s CANSimple-protocol verdeelt de 11-bit ID in een `node_id` (bits 10–5) en `cmd_id` (bits 4–0). :contentReference[oaicite:1]{index=1}  
+- `Set_Axis_State` (cmd 0x07) schakelt de as in/uit. `CLOSED_LOOP_CONTROL` is state 3, `IDLE` is state 1.  
+- `Set_Input_Vel` (cmd 0x0D) stuurt een snelheid en optioneel torque feed-forward, beide als 32-bit floats.  
+
+Je kunt dit uitbreiden met functies voor posities (`Set_Input_Pos`, cmd 0x0C) of torque (`Set_Input_Torque`, cmd 0x0E`) door dezelfde aanpak te volgen, maar met andere `cmd_id` en `struct.pack`-formats.
+::contentReference[oaicite:2]{index=2}
