@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "/home/pi/Documents/SERVO/SERVO-CODE/SERVO-CODE-TESTING/SERVO-CODE-TESTING-RaspiTestComms.py", line 5, in <module>
+    bus = can.interface.Bus(channel='can1', bustype='socketcan')
+  File "/home/pi/.local/lib/python3.7/site-packages/can/util.py", line 369, in wrapper
+    return f(*args, **kwargs)
+  File "/home/pi/.local/lib/python3.7/site-packages/can/interface.py", line 138, in __new__
+    bus = cls(channel, **kwargs)
+  File "/home/pi/.local/lib/python3.7/site-packages/can/interfaces/socketcan/socketcan.py", line 705, in __init__
+    bind_socket(self.socket, channel)
+  File "/home/pi/.local/lib/python3.7/site-packages/can/interfaces/socketcan/socketcan.py", line 512, in bind_socket
+    sock.bind((channel,))
+OSError: [Errno 19] No such device
